@@ -1,0 +1,15 @@
+# Service: stable virtual IP + DNS name in front of a changing set of pods (selected by label).
+# Has: load balancing, service discovery. Missing: it runs nothing, and does no HTTP routing (use Ingress).
+# Types: ClusterIP (internal, default), NodePort, LoadBalancer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  type: ClusterIP
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

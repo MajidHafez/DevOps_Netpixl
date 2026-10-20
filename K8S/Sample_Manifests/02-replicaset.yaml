@@ -1,0 +1,24 @@
+# ReplicaSet: keeps N identical pods alive (self-healing + scaling).
+# Has: replicas, selector. Missing: rolling update / rollback (changing the image does NOT replace running pods).
+# Rarely created by hand; Deployment creates it for you.
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: web-rs
+  labels:
+    app: web
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:                      # the pod template (same content as a Pod spec)
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27
+          ports:
+            - containerPort: 80

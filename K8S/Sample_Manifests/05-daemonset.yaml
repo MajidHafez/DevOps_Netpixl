@@ -1,0 +1,26 @@
+# DaemonSet: exactly one pod on every node (or every node matching a selector).
+# Has: per-node scheduling, auto-adds pod when a node joins. Missing: replicas (count = number of nodes).
+# Typical use: log collectors, node-exporter, CNI, kube-proxy.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-agent
+spec:
+  selector:
+    matchLabels:
+      app: node-agent
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: node-agent
+    spec:
+      tolerations:               # also run on tainted (e.g. control-plane) nodes
+        - operator: Exists
+      containers:
+        - name: agent
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo node agent alive; sleep 30; done"]

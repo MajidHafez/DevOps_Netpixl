@@ -1,0 +1,314 @@
+# ================= 01-pod.yaml =================
+# Pod: smallest deployable unit. No self-healing: if it dies (or the node dies) it is gone.
+# Has: containers, probes, resources. Missing: replicas, rolling update, rollback.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.27
+      ports:
+        - containerPort: 80
+      resources:
+        requests: { cpu: 100m, memory: 128Mi }
+        limits: { cpu: 500m, memory: 256Mi }
+      readinessProbe:
+        httpGet: { path: /, port: 80 }
+      livenessProbe:
+        httpGet: { path: /, port: 80 }
+  restartPolicy: Always
+---
+# ================= 02-replicaset.yaml =================
+# ReplicaSet: keeps N identical pods alive (self-healing + scaling).
+# Has: replicas, selector. Missing: rolling update / rollback (changing the image does NOT replace running pods).
+# Rarely created by hand; Deployment creates it for you.
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: web-rs
+  labels:
+    app: web
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:                      # the pod template (same content as a Pod spec)
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+---
+# ================= 03-deployment.yaml =================
+# Deployment: manages ReplicaSets. The default choice for stateless apps.
+# Has: everything ReplicaSet has + rolling updates, rollback (kubectl rollout undo), revision history.
+# Missing: stable pod identity, per-pod storage (use StatefulSet).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+          livenessProbe:
+            httpGet: { path: /, port: 80 }
+---
+# ================= 04-statefulset.yaml =================
+# StatefulSet: for stateful apps (databases, Kafka, etc.).
+# Has: stable names (web-0, web-1...), ordered start/stop, one PVC per pod (volumeClaimTemplates), stable DNS via headless Service.
+# Missing: easy rollback history like Deployment; pods are not interchangeable.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-headless
+spec:
+  clusterIP: None                # headless: gives each pod its own DNS record
+  selector:
+    app: web-sts
+  ports:
+    - port: 80
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web-sts
+spec:
+  serviceName: web-headless      # required, must match the headless Service
+  replicas: 3
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: web-sts
+  template:
+    metadata:
+      labels:
+        app: web-sts
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:          # a separate PVC is created for each replica
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+# ================= 05-daemonset.yaml =================
+# DaemonSet: exactly one pod on every node (or every node matching a selector).
+# Has: per-node scheduling, auto-adds pod when a node joins. Missing: replicas (count = number of nodes).
+# Typical use: log collectors, node-exporter, CNI, kube-proxy.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-agent
+spec:
+  selector:
+    matchLabels:
+      app: node-agent
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: node-agent
+    spec:
+      tolerations:               # also run on tainted (e.g. control-plane) nodes
+        - operator: Exists
+      containers:
+        - name: agent
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo node agent alive; sleep 30; done"]
+---
+# ================= 06-job.yaml =================
+# Job: run-to-completion task. Pods are expected to finish, not stay up.
+# Has: completions, parallelism, backoffLimit, TTL cleanup. Missing: replicas, long-running behaviour, schedule (use CronJob).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+spec:
+  completions: 1
+  parallelism: 1
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure   # must be OnFailure or Never (never Always)
+      containers:
+        - name: migrate
+          image: busybox:1.36
+          command: ["sh", "-c", "echo running migration && sleep 5"]
+---
+# ================= 07-cronjob.yaml =================
+# CronJob: creates a Job on a schedule.
+# Has: cron schedule, concurrencyPolicy, history limits. Missing: it never runs pods directly (it wraps a Job).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-backup
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: busybox:1.36
+              command: ["sh", "-c", "echo backup started && sleep 5"]
+---
+# ================= 08-service.yaml =================
+# Service: stable virtual IP + DNS name in front of a changing set of pods (selected by label).
+# Has: load balancing, service discovery. Missing: it runs nothing, and does no HTTP routing (use Ingress).
+# Types: ClusterIP (internal, default), NodePort, LoadBalancer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  type: ClusterIP
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+# ================= 09-configmap.yaml =================
+# ConfigMap: non-secret configuration (env vars, files). Stored as plain text in etcd.
+# Has: key/value or file content. Missing: encryption/secrecy, and it runs nothing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+data:
+  LOG_LEVEL: info
+  nginx.conf: |
+    server {
+      listen 80;
+      location / { return 200 'ok'; }
+    }
+---
+# ================= 10-secret.yaml =================
+# Secret: like ConfigMap but for sensitive data. Only base64-encoded by default (NOT encrypted unless
+# encryption-at-rest is enabled on the API server). Restrict access with RBAC.
+# stringData lets you write plain text; Kubernetes converts it to base64.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: web-secret
+type: Opaque
+stringData:
+  DB_USER: app
+  DB_PASSWORD: change-me
+---
+# ================= 11-ingress.yaml =================
+# Ingress: HTTP/HTTPS routing (host + path rules, TLS) to Services.
+# Has: L7 routing, TLS termination. Missing: it does nothing without an Ingress Controller (nginx, Traefik...).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [web.example.com]
+      secretName: web-tls
+  rules:
+    - host: web.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 80
+---
+# ================= 12-pvc.yaml =================
+# PersistentVolumeClaim: a request for storage. Bound to a PV (manually or dynamically via StorageClass).
+# Has: size, access mode, storageClass. Missing: it is only a claim; a pod must mount it via volumes.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 5Gi
+---
+# ================= 13-hpa.yaml =================
+# HorizontalPodAutoscaler: changes .spec.replicas of a Deployment/StatefulSet based on metrics.
+# Needs Metrics Server. Missing: it does not create pods itself, it only scales another workload.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

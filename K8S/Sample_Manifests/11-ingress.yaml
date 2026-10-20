@@ -1,0 +1,22 @@
+# Ingress: HTTP/HTTPS routing (host + path rules, TLS) to Services.
+# Has: L7 routing, TLS termination. Missing: it does nothing without an Ingress Controller (nginx, Traefik...).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [web.example.com]
+      secretName: web-tls
+  rules:
+    - host: web.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 80

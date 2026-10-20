@@ -1,0 +1,13 @@
+# ConfigMap: non-secret configuration (env vars, files). Stored as plain text in etcd.
+# Has: key/value or file content. Missing: encryption/secrecy, and it runs nothing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+data:
+  LOG_LEVEL: info
+  nginx.conf: |
+    server {
+      listen 80;
+      location / { return 200 'ok'; }
+    }

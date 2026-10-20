@@ -1,0 +1,12 @@
+# PersistentVolumeClaim: a request for storage. Bound to a PV (manually or dynamically via StorageClass).
+# Has: size, access mode, storageClass. Missing: it is only a claim; a pod must mount it via volumes.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 5Gi
